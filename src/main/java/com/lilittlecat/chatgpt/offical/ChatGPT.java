@@ -1,22 +1,33 @@
 package com.lilittlecat.chatgpt.offical;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.lilittlecat.chatgpt.offical.entity.*;
-import com.lilittlecat.chatgpt.offical.exception.BizException;
-import com.lilittlecat.chatgpt.offical.exception.Error;
-import lombok.Builder;
-import lombok.extern.slf4j.Slf4j;
-import okhttp3.*;
+import static com.lilittlecat.chatgpt.offical.entity.Constant.DEFAULT_CHAT_COMPLETION_API_URL;
+import static com.lilittlecat.chatgpt.offical.entity.Constant.DEFAULT_MODEL;
+import static com.lilittlecat.chatgpt.offical.entity.Constant.DEFAULT_USER;
+import static com.lilittlecat.chatgpt.offical.entity.Constant.DEFAULT_MAX_TOKENS;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
-import static com.lilittlecat.chatgpt.offical.entity.Constant.*;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lilittlecat.chatgpt.offical.entity.ChatCompletionRequestBody;
+import com.lilittlecat.chatgpt.offical.entity.ChatCompletionResponseBody;
+import com.lilittlecat.chatgpt.offical.entity.Message;
+import com.lilittlecat.chatgpt.offical.entity.Model;
+import com.lilittlecat.chatgpt.offical.exception.BizException;
+import com.lilittlecat.chatgpt.offical.exception.Error;
+
+import lombok.Builder;
+import lombok.extern.slf4j.Slf4j;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 
 /**
  * <p>
@@ -33,6 +44,7 @@ public class ChatGPT {
     private String apiHost = DEFAULT_CHAT_COMPLETION_API_URL;
     protected OkHttpClient client;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private Map<String,String> httpHeaders;
 
     public ChatGPT(String apiKey) {
         this.apiKey = apiKey;
@@ -67,6 +79,13 @@ public class ChatGPT {
         this.apiKey = apiKey;
         this.client = client;
     }
+    
+    public ChatGPT(String apiHost, String apiKey, OkHttpClient client, Map<String,String> httpHeaders) {
+        this.apiHost = apiHost;
+        this.apiKey = apiKey;
+        this.client = client;
+        this.httpHeaders = httpHeaders;
+    }
 
     public ChatGPT(String apiHost, String apiKey, Proxy proxy) {
         this.apiHost = apiHost;
@@ -84,27 +103,27 @@ public class ChatGPT {
 
 
     public String ask(String input) {
-        return ask(DEFAULT_MODEL.getName(), DEFAULT_USER, input);
+        return ask(DEFAULT_MODEL.getName(), DEFAULT_USER, input, DEFAULT_MAX_TOKENS);
     }
 
     public String ask(String user, String input) {
-        return ask(DEFAULT_MODEL.getName(), user, input);
+        return ask(DEFAULT_MODEL.getName(), user, input, DEFAULT_MAX_TOKENS);
     }
 
     public String ask(Model model, String input) {
-        return ask(model.getName(), DEFAULT_USER, input);
+        return ask(model.getName(), DEFAULT_USER, input, DEFAULT_MAX_TOKENS);
     }
 
     public String ask(List<Message> messages) {
-        return ask(DEFAULT_MODEL.getName(), messages);
+        return ask(DEFAULT_MODEL.getName(), DEFAULT_USER, messages, DEFAULT_MAX_TOKENS);
     }
 
     public String ask(Model model, List<Message> messages) {
-        return ask(model.getName(), messages);
+        return ask(model.getName(), DEFAULT_USER, messages, DEFAULT_MAX_TOKENS);
     }
 
-    public String ask(String model, List<Message> message) {
-        ChatCompletionResponseBody chatCompletionResponseBody = askOriginal(model, message);
+    public String ask(String model, String user, List<Message> message, Integer maxTokens) {
+        ChatCompletionResponseBody chatCompletionResponseBody = askOriginal(model, user, message, maxTokens);
         List<ChatCompletionResponseBody.Choice> choices = chatCompletionResponseBody.getChoices();
         StringBuilder result = new StringBuilder();
         for (ChatCompletionResponseBody.Choice choice : choices) {
@@ -113,16 +132,21 @@ public class ChatGPT {
         return result.toString();
     }
 
-    public String ask(Model model, String user, String input) {
-        return ask(model.getName(), user, input);
+    public String ask(Model model, String user, String input, Integer maxTokens) {
+        return ask(model.getName(), user, input, maxTokens);
     }
 
-    private String buildRequestBody(String model, List<Message> messages) {
+    private String buildChatRequestBody(String model, String user, List<Message> messages, Integer maxTokens) {
         try {
-            ChatCompletionRequestBody requestBody = ChatCompletionRequestBody.builder()
+            ChatCompletionRequestBody.ChatCompletionRequestBodyBuilder builder = ChatCompletionRequestBody.builder()
                     .model(model)
                     .messages(messages)
-                    .build();
+                    .user(user);
+            
+            if(maxTokens>0)
+                   builder.maxTokens(maxTokens);
+ 
+            ChatCompletionRequestBody requestBody = builder.build();
             return objectMapper.writeValueAsString(requestBody);
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
@@ -137,12 +161,12 @@ public class ChatGPT {
      * @param input input
      * @return ChatCompletionResponseBody
      */
-    public ChatCompletionResponseBody askOriginal(String model, String role, String input) {
+    /*public ChatCompletionResponseBody askOriginal(String model, String role, String input) {
         return askOriginal(model, Collections.singletonList(Message.builder()
                 .role(role)
                 .content(input)
                 .build()));
-    }
+    }*/
 
     /**
      * ask for response message
@@ -151,13 +175,17 @@ public class ChatGPT {
      * @param messages messages
      * @return ChatCompletionResponseBody
      */
-    public ChatCompletionResponseBody askOriginal(String model, List<Message> messages) {
-        RequestBody body = RequestBody.create(buildRequestBody(model, messages), MediaType.get("application/json; charset=utf-8"));
-        Request request = new Request.Builder()
+    public ChatCompletionResponseBody askOriginal(String model, String user, List<Message> messages, Integer maxTokens) {
+    	
+        RequestBody body = RequestBody.create(buildChatRequestBody(model, user, messages, maxTokens), MediaType.get("application/json; charset=utf-8"));
+        
+        Request.Builder builder = new Request.Builder()
                 .url(apiHost)
-                .header("Authorization", "Bearer " + apiKey)
-                .post(body)
-                .build();
+                .post(body);
+        
+        addHttpHeaders(builder);
+        
+        Request request = builder.build();
 
         try (Response response = client.newCall(request).execute()) {
             if (!response.isSuccessful()) {
@@ -165,8 +193,9 @@ public class ChatGPT {
                     log.error("Request failed: {}, please try again", response.message());
                     throw new BizException(response.code(), "Request failed");
                 } else {
-                    log.error("Request failed: {}, please try again", response.body().string());
-                    throw new BizException(response.code(), response.body().string());
+                	String bodyString = response.body().string();
+                    log.error("Request failed: {}, please try again", bodyString);
+                    throw new BizException(response.code(), bodyString);
                 }
             } else {
                 assert response.body() != null;
@@ -187,11 +216,12 @@ public class ChatGPT {
      * @param content content
      * @return String message
      */
-    public String ask(String model, String role, String content) {
-        ChatCompletionResponseBody chatCompletionResponseBody = askOriginal(model, Collections.singletonList(Message.builder()
-                .role(role)
+    public String ask(String model, String user, String content, Integer maxTokens) {
+        ChatCompletionResponseBody chatCompletionResponseBody = askOriginal(model, user, Collections.singletonList(Message.builder()
+                .role("user")
                 .content(content)
-                .build()));
+                .build()),
+        		maxTokens);
         List<ChatCompletionResponseBody.Choice> choices = chatCompletionResponseBody.getChoices();
         StringBuilder result = new StringBuilder();
         for (ChatCompletionResponseBody.Choice choice : choices) {
@@ -199,5 +229,14 @@ public class ChatGPT {
         }
         return result.toString();
     }
+
+	private void addHttpHeaders(Request.Builder builder) {
+		if(httpHeaders==null) {
+        	builder.addHeader("Authorization", "Bearer " + apiKey);
+        } else {
+        	for (Map.Entry<String, String> entry : httpHeaders.entrySet()) 
+        		builder.addHeader(entry.getKey(), entry.getValue());
+        }
+	}
 
 }

@@ -21,4 +21,5 @@ public class Constant {
     public static final String DEFAULT_CHAT_COMPLETION_API_URL = "https://api.openai.com/v1/chat/completions";
     public static final String DEFAULT_USER = "user";
     public static final Model DEFAULT_MODEL = Model.GPT_3_5_TURBO;
+    public static final Integer DEFAULT_MAX_TOKENS = 0;  // 0=no limit
 }

@@ -22,6 +22,7 @@ public enum Model {
     TEXT_DAVINCI_003("text-davinci-003"),
     TEXT_DAVINCI_002("text-davinci-002"),
     TEXT_DAVINCI_001("text-davinci-001"),
+    AZURE_GPT_3_5_TURBO("gpt-35-turbo"),
 
     ;
 
